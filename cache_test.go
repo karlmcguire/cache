@@ -8,26 +8,21 @@ import (
 )
 
 func TestCache(t *testing.T) {
-	c := NewCache(4)
-	fmt.Println(c.Set("1", 1))
-	fmt.Println(c.Set("2", 1))
-	fmt.Println(c.Set("3", 1))
-	fmt.Println(c.Set("4", 1))
-	fmt.Println(c.Set("5", 1))
-	fmt.Println(c.Set("6", 1))
+	p := NewPolicy(4)
 
-	c.Get("3")
-	c.Get("3")
+	fmt.Println(p.Add("1"))
+	fmt.Println(p.Add("2"))
+	fmt.Println(p.Add("3"))
+	fmt.Println(p.Add("4"))
 
-	spew.Dump(c.meta.data)
-}
+	p.Get("2")
+	p.Get("2")
+	p.Get("2")
+	p.Get("1")
+	p.Get("1")
+	p.Get("3")
 
-func BenchmarkCache(b *testing.B) {
-	c := NewCache(4)
-	b.SetBytes(1)
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			c.Get("1")
-		}
-	})
+	fmt.Println(p.Add("5"))
+
+	spew.Dump(p)
 }

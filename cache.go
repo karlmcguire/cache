@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+/*
 type Cache struct {
 	data *sync.Map
 	meta *Policy
@@ -25,59 +26,102 @@ func (c *Cache) Get(key string) interface{} {
 	return value
 }
 
-func (c *Cache) Set(key string, value interface{}) string {
-	var victim string
-	if victim = c.meta.Add(key); victim != "" {
+func (c *Cache) Set(key string, value interface{}) {
+	if victim := c.meta.Add(key); victim != "" {
 		// delete victim from hash map
 		c.data.Delete(victim)
 	}
 	// add new item
 	c.data.Store(key, value)
-	return victim
 }
+*/
 
 type Policy struct {
 	sync.Mutex
+	segs [2]*Segment
+}
+
+type Segment struct {
 	data map[string]uint8
 	size uint64
 }
 
-func NewPolicy(size uint64) *Policy {
-	return &Policy{
+func NewSegment(size uint64) *Segment {
+	return &Segment{
 		data: make(map[string]uint8, size),
 		size: size,
 	}
 }
 
+func (s *Segment) Add(key string) (victimKey string, victimCount uint8) {
+	// check if eviction is needed
+	if uint64(len(s.data)) == s.size {
+		victimKey, victimCount = s.candidate()
+		s.evict(victimKey)
+	}
+	s.data[key]++
+	return
+}
+
+func (s *Segment) evict(key string) {
+	delete(s.data, key)
+}
+
+func (s *Segment) candidate() (string, uint8) {
+	i, minKey, minCount := 0, "", uint8(math.MaxUint8)
+	for key, count := range s.data {
+		if count < minCount {
+			minKey, minCount = key, count
+		}
+		if i++; i == 5 {
+			break
+		}
+	}
+	return minKey, minCount
+}
+
+func NewPolicy(size uint64) *Policy {
+	return &Policy{
+		segs: [2]*Segment{
+			// window
+			NewSegment(uint64(math.Ceil(float64(size) * 0.01))),
+			// main
+			NewSegment(uint64(math.Floor(float64(size) * 0.99))),
+		},
+	}
+}
+
+func (p *Policy) Seg(key string) int {
+	if p.segs[0].data[key] != 0 {
+		return 0
+	} else if p.segs[1].data[key] != 0 {
+		return 1
+	}
+	return -1
+}
+
 func (p *Policy) Get(key string) {
 	p.Lock()
 	defer p.Unlock()
-	p.data[key]++
+	if seg := p.Seg(key); seg != -1 {
+		p.segs[seg].data[key]++
+	}
 }
 
 func (p *Policy) Add(key string) (victim string) {
 	p.Lock()
 	defer p.Unlock()
 	// do nothing if the item is already in the policy
-	if _, exists := p.data[key]; exists {
+	if p.Seg(key) != -1 {
 		return
 	}
-	// check if eviction is needed
-	if uint64(len(p.data)) >= p.size {
-		// evict
-		i, min := 0, uint8(math.MaxUint8)
-		for k, v := range p.data {
-			if v < min {
-				victim, min = k, v
-			}
-			// stop at sample size
-			if i++; i == 5 {
-				break
+	if windowKey, windowCount := p.segs[0].Add(key); windowKey != "" {
+		if mainKey, mainCount := p.segs[1].candidate(); mainKey != "" {
+			if windowCount > mainCount {
+				p.segs[1].evict(mainKey)
 			}
 		}
-		delete(p.data, victim)
+		victim, _ = p.segs[1].Add(windowKey)
 	}
-	// add item to policy
-	p.data[key]++
 	return
 }
