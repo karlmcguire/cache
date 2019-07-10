@@ -54,9 +54,7 @@ func NewSegment(size uint64) *Segment {
 }
 
 func (s *Segment) Add(key string) (victimKey string, victimCount uint8) {
-	// check if eviction is needed
-	if uint64(len(s.data)) == s.size {
-		victimKey, victimCount = s.candidate()
+	if victimKey, victimCount = s.candidate(); victimKey != "" {
 		s.evict(victimKey)
 	}
 	s.data[key]++
@@ -68,6 +66,9 @@ func (s *Segment) evict(key string) {
 }
 
 func (s *Segment) candidate() (string, uint8) {
+	if uint64(len(s.data)) != s.size {
+		return "", 0
+	}
 	i, minKey, minCount := 0, "", uint8(math.MaxUint8)
 	for key, count := range s.data {
 		if count < minCount {
@@ -115,13 +116,37 @@ func (p *Policy) Add(key string) (victim string) {
 	if p.Seg(key) != -1 {
 		return
 	}
-	if windowKey, windowCount := p.segs[0].Add(key); windowKey != "" {
-		if mainKey, mainCount := p.segs[1].candidate(); mainKey != "" {
-			if windowCount > mainCount {
-				p.segs[1].evict(mainKey)
-			}
-		}
-		victim, _ = p.segs[1].Add(windowKey)
+	// get the window victim and count if the window is full
+	windowKey, windowCount := p.segs[0].Add(key)
+	if windowKey == "" {
+		// window has room, so nothing else needs to be done
+		return
 	}
+	// get the main eviction candidate key and count if the main segment is full
+	mainKey, mainCount := p.segs[1].candidate()
+	if mainKey == "" {
+		// main has room, so just move window victim to there
+		goto move
+	}
+	// compare the window victim with the main candidate, also note that window
+	// victims are preferred (>=) over main candidates, as we can assume that
+	// window victims have been used more recently than the main candidate
+	if windowCount >= mainCount {
+		// main candidate lost to the window victim, so actually evict the main
+		// candidate
+		victim = mainKey
+		p.segs[1].evict(mainKey)
+		// main now has room for one more, so move the window victim to there
+		goto move
+	} else {
+		// window victim lost to the main candidate, and the window victim has
+		// already been evicted from the window, so nothing else needs to be
+		// done
+		victim = windowKey
+	}
+	return
+move:
+	// move moves the window key-count pair to the main segment
+	p.segs[1].data[windowKey] = windowCount
 	return
 }

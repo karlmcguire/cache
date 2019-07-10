@@ -15,14 +15,20 @@ func TestCache(t *testing.T) {
 	fmt.Println(p.Add("3"))
 	fmt.Println(p.Add("4"))
 
+	p.Get("4")
+	p.Get("4")
+	p.Get("4")
 	p.Get("2")
 	p.Get("2")
 	p.Get("2")
-	p.Get("1")
-	p.Get("1")
-	p.Get("3")
+	p.Get("2")
 
 	fmt.Println(p.Add("5"))
+
+	p.Get("5")
+	p.Get("5")
+
+	fmt.Println(p.Add("6"))
 
 	spew.Dump(p)
 }
