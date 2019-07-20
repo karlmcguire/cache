@@ -1,34 +1,12 @@
 package cache
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
 )
 
 func TestCache(t *testing.T) {
-	p := NewPolicy(4)
-
-	fmt.Println(p.Add("1"))
-	fmt.Println(p.Add("2"))
-	fmt.Println(p.Add("3"))
-	fmt.Println(p.Add("4"))
-
-	p.Get("4")
-	p.Get("4")
-	p.Get("4")
-	p.Get("2")
-	p.Get("2")
-	p.Get("2")
-	p.Get("2")
-
-	fmt.Println(p.Add("5"))
-
-	p.Get("5")
-	p.Get("5")
-
-	fmt.Println(p.Add("6"))
-
-	spew.Dump(p)
+	c := NewCache(8)
+	spew.Dump(c)
 }
