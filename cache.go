@@ -2,89 +2,74 @@ package cache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/dgraph-io/ristretto"
 )
-
-type Cache struct {
-	data ristretto.Map
-	meta *policy
-}
-
-func NewCache(size uint64) *Cache {
-	return &Cache{
-		data: ristretto.NewMap(),
-		meta: newPolicy(size),
-	}
-}
-
-func (c *Cache) Get(key string) interface{} {
-	c.meta.hit(key)
-	return c.data.Get(key)
-}
-
-func (c *Cache) Set(key string, value interface{}, cost uint64) []string {
-	return nil
-}
-
-////////////////////////////////////////////////////////////////////////////////
 
 type (
-	policy struct {
+	Cache struct {
 		sync.Mutex
-		data   map[string]policyItem
-		sample *policySample
-		size   uint64
-		used   uint64
-		ravg   uint64
+		data *sync.Map
+		sets chan string
+		used uint64
 	}
-	policySample []*policyItem
-	policyItem   struct {
-		key     string
-		hits    uint64
-		cost    uint64
-		created int64
-		expire  int64
+	item struct {
+		value interface{}
+		size  uint64
+		when  uint64
+		hits  uint64
 	}
 )
 
-func newPolicyItem(key string, cost uint64) policyItem {
-	return policyItem{0, cost, time.Now().UnixNano(), -1}
+func NewCache(size uint64) *Cache {
+	cache := &Cache{
+		data: &sync.Map{},
+		sets: make(chan string, 64),
+	}
+	go cache.Evictor(size)
+	return cache
 }
 
-func newPolicy(size uint64) *policy {
-	return &policy{
-		data:   make(map[string]policyItem, 0),
-		sample: make(policySample, 0, 5),
-		size:   size,
+func (c *Cache) Get(key string) (interface{}, bool) {
+	if i := c.get(key); i != nil {
+		i.hits++
+		return i.value, true
 	}
+	return nil, false
 }
 
-func (p *policy) hit(key string) {
-	p.Lock()
-	defer p.Unlock()
-	if item, exists := p.data[key]; exists {
-		item.hits++
-		p.data[key] = item
+func (c *Cache) get(key string) *item {
+	if i, _ := c.data.Load(key); i != nil {
+		return i.(*item)
 	}
-}
-
-func (p *policy) add(key string, cost uint64) []string {
-	p.Lock()
-	defer p.Unlock()
-	// if already in the cache, just update the cost value
-	if item, exists := p.data[key]; exists {
-		item.cost = cost
-		p.data[key] = item
-		return nil
-	}
-	// if eviction is needed
-	if p.used+cost > p.size {
-
-	}
-
-	// add to the policy with no eviction needed
-	p.data[key] = newPolicyItem(key, cost)
 	return nil
+}
+
+func (c *Cache) Set(key string, value interface{}, size uint64) {
+	// TODO: this doesn't handle value / cost updates
+	if _, had := c.data.LoadOrStore(key, &item{
+		value: value,
+		size:  size,
+		when:  uint64(time.Now().Unix()),
+		hits:  1,
+	}); had {
+		atomic.AddUint64(&c.used, size)
+		c.sets <- key
+	}
+}
+
+func (c *Cache) Evictor(size uint64) {
+	for key := range c.sets {
+		_ = key
+	}
+}
+
+func (i *item) priority() float64 {
+	pass := float64(uint64(time.Now().Unix()) - i.when)
+	if pass == 0 {
+		pass = 1.0
+	}
+	hits := float64(i.hits)
+	cost := 1 / float64(i.size)
+	return (hits / pass) * cost
 }
